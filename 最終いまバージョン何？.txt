@@ -1,0 +1,341 @@
+function doGet(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // URLパラメータからユーザー名を取得
+  const currentUser = (e && e.parameter && e.parameter.user) ? e.parameter.user : "";
+
+  // 現場一覧の取得
+  const sites = ss.getSheetByName("現場").getRange("A:A").getValues().flat().filter(String);
+
+  // 作業員一覧の取得
+  const workers = ss.getSheetByName("作業員").getRange("A:A").getValues().flat().filter(String);
+
+  // 機材マスタシートからデータを丸ごと取得
+  const masterSheet = ss.getSheetByName("機材マスタ");
+  const masterData = masterSheet.getDataRange().getValues();
+
+  // 人数選択が必要な特定の協力会社リスト
+  const specCompanies = ["黒崎建設", "関西マックス", "志方建設", "森口興業"];
+
+  // 現場のプルダウンオプション生成
+  let siteOptions = "";
+  sites.forEach(site => {
+    siteOptions += "<option>" + site + "</option>";
+  });
+
+  // 作業員ボタンの生成
+  let workerChecks = "";
+  workers.forEach((worker, idx) => {
+    const isCurrentUser = (currentUser === worker);
+    const isSpec = specCompanies.includes(worker);
+    const displayStyle = (currentUser === "" || isCurrentUser) ? "block" : "none";
+    
+    workerChecks += '<div style="display:' + displayStyle + '; margin:12px 0; border:1px solid #ccc; border-radius:10px; overflow:hidden; background:#fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">' +
+        '<div class="worker-btn" id="w-btn-' + idx + '" data-worker="' + worker + '" data-status="none" data-hours="" data-count="1" data-isspec="' + isSpec + '" onclick="toggleWorker(' + idx + ')" style="padding:22px; font-size:28px; cursor:pointer; text-align:center; font-weight:bold; transition: 0.2s;">⬜ ' + worker + '</div>' +
+        '<div id="w-count-' + idx + '" style="display:none; background:#f9f9f9; padding:15px; text-align:center; border-top:1px dashed #ccc;">' +
+          '<span style="font-size:22px; display:block; margin-bottom:12px; color:#333; font-weight:bold;">出勤人数を選択：</span>' +
+          '<button type="button" onclick="setCount(' + idx + ', 1)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#28a745; color:#fff; font-weight:bold;">1人</button>' +
+          '<button type="button" onclick="setCount(' + idx + ', 2)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">2人</button>' +
+          '<button type="button" onclick="setCount(' + idx + ', 3)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">3人</button>' +
+          '<button type="button" onclick="setCount(' + idx + ', 4)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">4人</button>' +
+        '</div>' +
+        '<div id="w-over-' + idx + '" style="display:none; background:#f2f2f2; padding:15px; text-align:center; border-top:1px dashed #ccc;">' +
+          '<span style="font-size:22px; display:block; margin-bottom:12px; color:#333; font-weight:bold;">残業時間を選択：</span>' +
+          '<button type="button" onclick="setOvertime(' + idx + ', 1)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">1h</button>' +
+          '<button type="button" onclick="setOvertime(' + idx + ', 2)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">2h</button>' +
+          '<button type="button" onclick="setOvertime(' + idx + ', 3)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">3h</button>' +
+          '<button type="button" onclick="setOvertime(' + idx + ', 4)" style="font-size:24px; padding:15px 30px; margin:6px; border-radius:8px; border:1px solid #aaa; background:#fff; font-weight:bold;">4h</button>' +
+        '</div>' +
+      '</div>';
+  });
+
+  // 確認用の作業員選択プルダウン
+  let viewWorkerOptions = "";
+  workers.forEach(worker => {
+    viewWorkerOptions += '<option value="' + worker + '">' + worker + '</option>';
+  });
+
+  // 確認エリア用の「月」の選択肢を自動生成
+  let monthOptions = "";
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const label = yyyy + "年" + mm + "月";
+    const value = yyyy + "-" + mm;
+    monthOptions += '<option value="' + value + '">' + label + '</option>';
+  }
+
+  // 機材アコーディオン生成
+  let equipmentSections = "";
+  if (masterData.length > 0) {
+    const numCols = masterData[0].length;
+    for (let col = 0; col < numCols; col++) {
+      const company = masterData[0][col];
+      if (!company) continue;
+
+      let machineChecks = "";
+      for (let row = 1; row < masterData.length; row++) {
+        const machineName = masterData[row][col];
+        if (!machineName) continue;
+        
+        machineChecks += '<label style="display:block; padding:18px; margin:10px 0; border:1px solid #eee; border-radius:8px; font-size:26px; cursor:pointer; background:#fff;">' +
+            '<input type="checkbox" class="equipment-checkbox" data-company="' + company + '" value="' + machineName + '" style="transform: scale(1.7); margin-right: 15px; vertical-align: middle;">' +
+            '<span style="vertical-align: middle;">' + machineName + '</span>' +
+          '</label>';
+      }
+
+      if (machineChecks !== "") {
+        equipmentSections += '<div style="margin:15px 0; border:1px solid #bbb; border-radius:10px; overflow:hidden;">' +
+            '<div onclick="toggleAccordion(\'comp-' + col + '\')" style="background:#e6f2ff; padding:22px; font-size:26px; font-weight:bold; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">' +
+              '<span>🟦 ' + company + '</span>' +
+              '<span id="icon-comp-' + col + '" style="margin-left:auto;">▼</span>' +
+            '</div>' +
+            '<div id="comp-' + col + '" class="accordion-content" style="display:none; padding:15px; background:#fafafa; border-top:1px solid #bbb;">' +
+              machineChecks +
+            '</div>' +
+          '</div>';
+      }
+    }
+  }
+
+  // HTMLテンプレートの読み込みと変数の流し込み
+  const template = HtmlService.createTemplateFromFile("index");
+  template.currentUser = currentUser;
+  template.siteOptions = siteOptions;
+  template.viewWorkerOptions = viewWorkerOptions;
+  template.monthOptions = monthOptions;
+  template.workerChecks = workerChecks;
+  template.equipmentSections = equipmentSections;
+
+  return template.evaluate().setTitle("木下土木 出面・機材管理");
+}
+
+// 作業員出面月報の取得
+function getWorkerMonthlyReport(workerName, targetMonth) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); 
+  if (!ss.getSheetByName(workerName)) return null;
+  const dataSheet = ss.getSheetByName("出面");
+  if (!dataSheet) return null;
+  const data = dataSheet.getDataRange().getValues();
+  const records = [];
+  
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const dateObj = new Date(row[0]);
+    if (isNaN(dateObj.getTime())) continue;
+    const rowMonth = dateObj.getFullYear() + "-" + String(dateObj.getMonth() + 1).padStart(2, "0");
+    if (rowMonth === targetMonth && row[2] === workerName) {
+      let statusStr = "通常";
+      let overtimeStr = "-";
+      if (row[3] === "半日") statusStr = "半日";
+      if (row[3].indexOf("残業") !== -1) overtimeStr = row[3].replace(/[^0-9]/g, "") + "h";
+      records.push({
+        dayNum: dateObj.getDate(),
+        day: dateObj.getDate() + "日",
+        site: row[1] + (statusStr === "半日" ? " (半日)" : ""),
+        count: row[4] || "1",
+        overtime: overtimeStr
+      });
+    }
+  }
+  return records.sort((a, b) => a.dayNum - b.dayNum);
+}
+
+// データの保存
+function saveData(site, workers, equipment, workDate, concVol, fuelSrc, fuelType, fuelVol) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const workDay = new Date(workDate);
+  const attendanceSheet = ss.getSheetByName("出面");
+  
+  workers.forEach(worker => {
+    let statusStr = "通常";
+    if (worker.status === "half") statusStr = "半日";
+    if (worker.status === "over") statusStr = "残業 " + worker.hours + "h";
+    attendanceSheet.appendRow([workDay, site, worker.name, statusStr, worker.count]);
+  });
+  
+  const equipmentSheet = ss.getSheetByName("機材使用");
+  equipment.forEach(item => {
+    equipmentSheet.appendRow([workDay, site, item.company, item.machine]);
+  });
+  
+  if (concVol && concVol > 0) {
+    const concSheet = ss.getSheetByName("生コン使用");
+    if (concSheet) concSheet.appendRow([workDay, site, parseFloat(concVol)]);
+  }
+  
+  if (fuelVol && fuelVol > 0 && fuelSrc) {
+    const fuelSheet = ss.getSheetByName("燃料使用");
+    if (fuelSheet) fuelSheet.appendRow([workDay, site, fuelSrc, fuelType, parseFloat(fuelVol)]);
+  }
+  
+  createAttendanceTable();
+  updateMonthlyReport();
+}
+
+// 前回データ取得
+function getLastData(site, currentUser) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet(); 
+  let lastWorkers = [];
+  let lastEquipment = [];
+  let lastConcreteVolume = "";
+  let lastFuelSource = "";
+  let lastFuelType = "";
+  let lastFuelVolume = "";
+
+  const attSheet = ss.getSheetByName("出面");
+  let targetDate = null;
+  
+  if (attSheet) {
+    const attData = attSheet.getDataRange().getValues();
+    for (let i = attData.length - 1; i >= 1; i--) {
+      if (attData[i][1] == site) {
+        if (currentUser !== "" && attData[i][2] !== currentUser) continue;
+        targetDate = attData[i][0];
+        for (let j = i; j >= 1; j--) {
+          if (attData[j][1] == site && String(attData[j][0]) == String(targetDate)) {
+            if (currentUser !== "" && attData[j][2] !== currentUser) continue;
+            let statusKey = "normal";
+            let hrs = "";
+            const val = String(attData[j][3]);
+            const cnt = String(attData[j][4] || "1");
+            if (val === "半日") {
+              statusKey = "half";
+            } else if (val.indexOf("残業") !== -1) {
+              statusKey = "over";
+              hrs = val.replace(/[^0-9]/g, "");
+            }
+            lastWorkers.push({ name: attData[j][2], status: statusKey, hours: hrs, count: cnt });
+          }
+        }
+        break;
+      }
+    }
+  }
+  
+  if (ss.getSheetByName("機材使用") && targetDate) {
+    const eqData = ss.getSheetByName("機材使用").getDataRange().getValues();
+    for (let j = eqData.length - 1; j >= 1; j--) {
+      if (eqData[j][1] == site && String(eqData[j][0]) == String(targetDate)) {
+        lastEquipment.push({ company: eqData[j][2], machine: eqData[j][3] });
+      }
+    }
+  }
+  
+  if (ss.getSheetByName("生コン使用") && targetDate) {
+    const concData = ss.getSheetByName("生コン使用").getDataRange().getValues();
+    for (let j = concData.length - 1; j >= 1; j--) {
+      if (concData[j][1] == site && String(concData[j][0]) == String(targetDate)) {
+        lastConcreteVolume = concData[j][2];
+        break;
+      }
+    }
+  }
+  
+  if (ss.getSheetByName("燃料使用") && targetDate) {
+    const fuelData = ss.getSheetByName("燃料使用").getDataRange().getValues();
+    for (let j = fuelData.length - 1; j >= 1; j--) {
+      if (fuelData[j][1] == site && String(fuelData[j][0]) == String(targetDate)) {
+        lastFuelSource = fuelData[j][2];
+        lastFuelType = fuelData[j][3];
+        lastFuelVolume = fuelData[j][4];
+        break;
+      }
+    }
+  }
+  
+  const uniqueWorkers = [];
+  const workerNames = new Set();
+  for (let k = 0; k < lastWorkers.length; k++) {
+    if (!workerNames.has(lastWorkers[k].name)) {
+      workerNames.add(lastWorkers[k].name);
+      uniqueWorkers.push(lastWorkers[k]);
+    }
+  }
+  return { workers: uniqueWorkers, equipment: lastEquipment, concreteVolume: lastConcreteVolume, fuelSource: lastFuelSource, fuelType: lastFuelType, fuelVolume: lastFuelVolume };
+}
+
+function createAttendanceTable() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const dataSheet = ss.getSheetByName("出面");
+  const tableSheet = ss.getSheetByName("月間出面表");
+  if (!dataSheet || !tableSheet) return;
+  tableSheet.clear();
+  const data = dataSheet.getDataRange().getValues();
+  const workers = [...new Set(data.slice(1).map(row => row[2]))].sort();
+  const year = new Date().getFullYear();
+  const month = new Date().getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  
+  let header = ["名前"];
+  for (let d = 1; d <= lastDay; d++) {
+    header.push(d);
+  }
+  tableSheet.getRange(1, 1, 1, header.length).setValues([header]);
+  
+  workers.forEach((worker, index) => {
+    let row = [worker];
+    for (let d = 1; d <= lastDay; d++) {
+      row.push("");
+    }
+    tableSheet.getRange(index + 2, 1, 1, row.length).setValues([row]);
+  });
+  
+  data.slice(1).forEach(record => {
+    const date = new Date(record[0]);
+    const worker = record[2];
+    const type = String(record[3]);
+    const countVal = parseFloat(record[4] || 1);
+    const day = date.getDate();
+    const rowIndex = workers.indexOf(worker) + 2;
+    if (rowIndex > 1) {
+      let mark = countVal;
+      if (type === "半日") {
+        mark = countVal * 0.5;
+      } else if (type.indexOf("残業") !== -1) {
+        const hrs = parseInt(type.replace(/[^0-9]/g, ""), 10) || 0;
+        mark = countVal + (hrs * 0.25);
+      }
+      tableSheet.getRange(rowIndex, day + 1).setValue(mark);
+    }
+  });
+}
+
+function updateMonthlyReport() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const data = ss.getSheetByName("出面").getDataRange().getValues();
+  const specCompanies = ["黒崎建設", "関西マックス", "志方建設", "森口興業"];
+  
+  data.slice(1).forEach(row => {
+    const date = new Date(row[0]);
+    const site = row[1];
+    const worker = row[2];
+    const type = row[3];
+    const countVal = row[4] ? parseInt(row[4], 10) : 1;
+    const workerSheet = ss.getSheetByName(worker);
+    if (!workerSheet) return;
+    const day = date.getDate();
+    const targetRow = day + 5;
+    
+    if (type === "半日") {
+      workerSheet.getRange(targetRow, 5).setValue(site + " 半日");
+    } else {
+      workerSheet.getRange(targetRow, 5).setValue(site);
+    }
+    
+    if (specCompanies.includes(worker)) {
+      workerSheet.getRange(targetRow, 7).setValue(countVal);
+    } else {
+      workerSheet.getRange(targetRow, 7).setValue(1);
+    }
+    
+    if (type.indexOf("残業") !== -1) {
+      const parsedHours = parseInt(type.replace(/[^0-9]/g, ""), 10) || "";
+      workerSheet.getRange(targetRow, 8).setValue(parsedHours);
+    } else {
+      workerSheet.getRange(targetRow, 8).setValue("");
+    }
+  });
+}
